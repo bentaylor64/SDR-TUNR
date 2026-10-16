@@ -109,9 +109,8 @@ This is a focused browser preview, not complete parity with the native applicati
 - The one-pass browser channel checker is not the native continuous multi-band scanner or a full band survey.
 - ADS-B aircraft tracking and maps, propagation guidance, Morse text decoding, native band surveys, continuous scan/hold/skip/resume behavior, recording, trunk tracking, and other digital protocols are not included in the browser preview.
 
-## Try it and refresh it
+## Download and rebuild
 
-- [Open the hosted synthetic demo](https://sdr-tunr-preview.bentaylor64.chatgpt.site) *(site access may be required)*.
 - [Download the SDR-TUNR 1.14.0 browser-preview package](dist/downloads/SDR-TUNR-1.14.0-browser-preview.zip) for the local receiver source, verification material, and packaging scripts.
 
-This repository mirrors the deployed static preview. After extracting the downloadable package, refresh the web build from its `SDR-TUNR-Web` root with `scripts/package-web.py`, then `scripts/prepare-web-site.py`. When republishing, preserve the existing hosting-project identity.
+This repository contains the static browser preview. After extracting the downloadable package, refresh the web build from its `SDR-TUNR-Web` root with `scripts/package-web.py`, then `scripts/prepare-web-site.py`.
