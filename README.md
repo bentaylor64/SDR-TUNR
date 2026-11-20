@@ -325,5 +325,26 @@ python3 scripts/apply-sawyer-bandpack.py /path/to/extracted/SDR-TUNR-Web
 node --test tests/sawyer-bandpack.test.mjs
 ```
 
-The overlay copies two JavaScript files into the extracted package. It does not
+The overlay copies only the affected browser JavaScript files into the extracted package. It does not
 change binaries, hosted assets, USB settings, or the original download.
+
+
+## Signal Journal
+
+After completing a real one-pass scan with hits, choose **Save this scan to
+Signal Journal** in the results panel. The expandable journal on Explore keeps
+up to 50 saved sessions in this browser profile and origin, newest first. Each
+includes the scan time, band or preset, gain, PPM, squelch, and up to 12 measured
+hits with exact frequency, mode, and peak dBFS. Select a hit to tune back to it
+or choose **Export journal CSV** to compare sessions in a spreadsheet. Relative
+dBFS is not calibrated field strength; compare using consistent settings.
+
+Nothing is saved automatically. Cancelled, failed, empty, hosted-demo, and
+local synthetic-bridge scans cannot be saved. No audio, location, or account
+details are recorded or uploaded. Exported files are ordinary local files.
+The existing local package overlay described above enables Signal Journal
+for testing without changing the original 1.14.0 download.
+
+```sh
+node --test tests/signal-journal.test.mjs
+```

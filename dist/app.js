@@ -7,6 +7,7 @@ import {
 } from './radio-model.js';
 import { RadioDirectory, DIRECTORY_CATEGORIES, DIRECTORY_NOTE, validLocation } from './directory.js';
 import { SAWYER_PRESETS, sawyerChannels, sawyerScanChannels, addSawyerFavorites } from './sawyer-bandpack.js';
+import { eligibleObservation, loadJournal, saveObservation, journalCSV } from './signal-journal.js';
 
 const $ = id => document.getElementById(id);
 const hostedPreview = document.documentElement.dataset.runtime === 'hosted';
@@ -562,6 +563,69 @@ scanPanel.append(element('h2', '', 'Measured channel candidates'));
 const scanList = element('div'); scanPanel.append(scanList);
 scanPanel.append(element('p', 'help-text', 'Energy above your squelch threshold does not identify a station or guarantee intelligible audio. Select a frequency to listen.'));
 document.querySelector('.spectrum-column').append(scanPanel);
+const journalSave = element('button', 'button', 'Save this scan to Signal Journal');
+journalSave.hidden = true;
+scanPanel.append(journalSave);
+const journal = element('details', 'panel info-card');
+const journalHeading = element('summary', '', 'Signal Journal');
+const journalHelp = element('p', 'help-text', 'Saved only in this browser. After a real scan, choose Save to keep up to 50 scans with hits. Demo results cannot be saved. Signal levels are relative to the receiver, not calibrated field strength.');
+const journalExport = element('button', 'button', 'Export journal CSV');
+const journalList = element('div', 'station-list');
+journal.append(journalHeading, journalHelp, journalExport, journalList);
+scanPanel.after(journal);
+let journalRun = null, journalCandidate = null;
+
+function renderJournal() {
+  const entries = loadJournal();
+  journalExport.disabled = !entries.length;
+  journalList.replaceChildren(...entries.map(entry => {
+    const session = element('details', 'station-main');
+    session.append(element('summary', '', `${entry.label} · ${new Date(entry.recordedAt).toLocaleString()} · ${entry.hits.length} hit${entry.hits.length === 1 ? '' : 's'}`));
+    const settings = [
+      entry.gain !== null && `Gain ${entry.gain === -1 ? 'auto' : `${(entry.gain / 10).toFixed(1)} dB`}`,
+      entry.ppm !== null && `${entry.ppm} PPM`,
+      entry.squelch !== null && `Squelch ${entry.squelch} dBFS`,
+    ].filter(Boolean);
+    if (settings.length) session.append(element('p', 'help-text', settings.join(' · ')));
+    for (const hit of entry.hits) {
+      const row = element('div', 'scan-result');
+      const tune = element('button', '', `${formatFrequency(hit.frequency)} MHz · ${modeLabel(hit.mode)}`);
+      tune.addEventListener('click', () => tuneTo(hit.frequency, hit.mode));
+      row.append(tune, element('span', 'mono subtle', `${hit.power.toFixed(1)} dBFS`));
+      session.append(row);
+    }
+    return session;
+  }));
+  if (!entries.length) journalList.append(element('p', 'help-text', 'No saved scans yet.'));
+}
+
+journalSave.addEventListener('click', () => {
+  if (!journalCandidate) return;
+  const outcome = saveObservation(journalCandidate);
+  if (outcome !== 'saved' && outcome !== 'duplicate') {
+    notice('Could not save this scan. Check available browser storage and try again.', true);
+    return;
+  }
+  journalCandidate = null;
+  journalSave.hidden = true;
+  renderJournal();
+  journal.open = true;
+  notice(outcome === 'saved' ? 'Scan saved to Signal Journal.' : 'This scan is already saved.');
+});
+journalExport.addEventListener('click', () => {
+  const entries = loadJournal();
+  if (!entries.length) return;
+  const url = URL.createObjectURL(new Blob([journalCSV(entries)], {type: 'text/csv;charset=utf-8'}));
+  const link = element('a');
+  link.href = url;
+  link.download = 'sdr-tunr-signal-journal.csv';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+renderJournal();
+
 function renderScanResults() {
   scanPanel.hidden = false;
   scanList.replaceChildren(...scanResults.map(result => {
@@ -572,22 +636,27 @@ function renderScanResults() {
   }));
   if (!scanResults.length) scanList.append(element('p', 'help-text', currentScan ? 'Checking settled signal levels…' : 'No candidates crossed the selected threshold. Try a different band, antenna position, or squelch threshold.'));
 }
-async function runChannelScan(channels) {
+async function runChannelScan(channels, label) {
   if (hostedPreview) return;
   if (currentScan) { await scanner.cancel(); return; }
   if (!channels.length || state.busy) return;
+  const scanSettings = settings();
+  journalRun = { id: crypto.randomUUID(), recordedAt: new Date().toISOString(), label,
+    gain: scanSettings.gain, ppm: scanSettings.ppm, squelch: scanSettings.squelch };
+  journalCandidate = null;
+  journalSave.hidden = true;
   clearTimeout(tuningTimer); tuningRevision++; scanResults = []; currentScan = true; renderScanResults();
   scanButton.textContent = 'Stop scan'; renderReceiver();
-  try { await scanner.start(channels, settings()); }
-  catch (error) { report(error); currentScan = false; scanButton.textContent = 'Scan channels'; renderReceiver(); }
+  try { await scanner.start(channels, scanSettings); }
+  catch (error) { journalRun = null; report(error); currentScan = false; scanButton.textContent = 'Scan channels'; renderReceiver(); }
 }
-scanButton.addEventListener('click', () => runChannelScan(scanChannels(state.bandID)));
+scanButton.addEventListener('click', () => runChannelScan(scanChannels(state.bandID), getBand(state.bandID)?.title || 'Band scan'));
 packScan.addEventListener('click', () => {
   const channels = sawyerScanChannels(packSelect.value);
   if (hostedPreview || !channels.length || state.busy) return;
   showPage('explore');
   if (currentScan) return;
-  runChannelScan(channels);
+  runChannelScan(channels, `Sawyer · ${SAWYER_PRESETS[packSelect.value].label}`);
 });
 scanner.addEventListener('status', ({ detail }) => {
   currentScan = detail.running; scanButton.textContent = currentScan ? 'Stop scan' : 'Scan channels';
@@ -596,7 +665,12 @@ scanner.addEventListener('status', ({ detail }) => {
 scanner.addEventListener('result', ({ detail }) => {
   scanResults.push(detail); scanResults.sort((a, b) => b.power - a.power); scanResults.length = Math.min(12, scanResults.length); renderScanResults();
 });
-scanner.addEventListener('complete', ({ detail }) => { scanResults = detail.results || scanResults; renderScanResults(); renderFrequency(); applyVolume(); });
+scanner.addEventListener('complete', ({ detail }) => {
+  journalCandidate = eligibleObservation(journalRun, detail, transport.session?.demo);
+  journalRun = null;
+  journalSave.hidden = !journalCandidate;
+  scanResults = detail.results || scanResults; renderScanResults(); renderFrequency(); applyVolume();
+});
 scanner.addEventListener('error', ({ detail }) => report(detail.message));
 
 transport.addEventListener('status', ({ detail }) => {
