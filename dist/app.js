@@ -6,6 +6,7 @@ import {
   adjacentFrequency, snappedFrequency, selectBand, FineTuningSelection, loadFavorites, saveFavorites,
 } from './radio-model.js';
 import { RadioDirectory, DIRECTORY_CATEGORIES, DIRECTORY_NOTE, validLocation } from './directory.js';
+import { SAWYER_PRESETS, sawyerChannels, sawyerScanChannels, addSawyerFavorites } from './sawyer-bandpack.js';
 
 const $ = id => document.getElementById(id);
 const hostedPreview = document.documentElement.dataset.runtime === 'hosted';
@@ -154,7 +155,7 @@ function renderBandContext() {
     return button;
   }));
   const targets = scanChannels(band);
-  $('scan-button').disabled = hostedPreview || !targets.length || state.busy;
+  $('scan-button').disabled = hostedPreview || (!currentScan && (!targets.length || state.busy));
   $('scan-hint').textContent = hostedPreview ? 'Channel scanning is available with your local receiver.' : currentScan ? $('scan-hint').textContent : targets.length ? `One pass · ${targets.length} channels · measured candidates` : 'Use manual tuning on this band.';
 }
 function renderReceiver() {
@@ -490,6 +491,67 @@ function queueSpectrum(frame) {
   if (!paintTimer) paintTimer = setTimeout(paintPending, Math.max(0, 100 - (performance.now() - lastPaint)));
 }
 
+// A curated local pack is useful even without a location lookup or USB radio.
+const pack = element('article', 'panel info-card');
+pack.setAttribute('aria-labelledby', 'sawyer-bandpack-title');
+const packTitle = element('h2', '', 'Sawyer BandPack');
+packTitle.id = 'sawyer-bandpack-title';
+const packNote = element('p', 'help-text', 'Southwest Michigan · receive only. NOAA and airport weather/ATIS are tune-only in this pack, so continuous carriers stay out of its scans.');
+const packTools = element('div', 'scan-tools');
+const packLabel = element('label', '', 'Preset ');
+const packSelect = element('select');
+packSelect.id = 'sawyer-preset';
+packLabel.htmlFor = packSelect.id;
+packTools.append(packLabel, packSelect);
+for (const [id, preset] of Object.entries(SAWYER_PRESETS)) {
+  const option = element('option', '', preset.label + (preset.automatic ? '' : ' (manual only)'));
+  option.value = id;
+  packSelect.append(option);
+}
+const packScan = element('button', 'button', '');
+const packSave = element('button', 'button', 'Save preset to favorites');
+const packSummary = element('p', 'help-text');
+packSummary.setAttribute('role', 'status');
+const packRows = element('div', 'station-list');
+packTools.append(packScan, packSave);
+pack.append(packTitle, packNote, packTools, packSummary, packRows);
+$('page-nearby').querySelector('.page-heading').after(pack);
+
+function renderPack() {
+  const id = packSelect.value;
+  const channels = sawyerChannels(id);
+  const targets = sawyerScanChannels(id);
+  packSummary.textContent = targets.length
+    ? `${channels.length} listed channels · ${hostedPreview ? 'scanning requires the local receiver' : `${targets.length} one-pass scan targets`}`
+    : `${channels.length} manual-only channels · not scanned`;
+  packScan.textContent = 'Scan this preset';
+  packScan.disabled = hostedPreview || !targets.length;
+  packRows.replaceChildren(...channels.map(channel => {
+    const row = element('article', 'station-row'), main = element('div', 'station-main');
+    main.append(
+      element('h3', 'station-name', channel.name),
+      element('p', 'station-detail', [channel.detail, channel.sourceName, channel.manualOnly && 'Manual only'].filter(Boolean).join(' · ')),
+    );
+    const frequency = element('div', 'station-frequency', `${formatFrequency(channel.frequency)} MHz`);
+    frequency.append(element('small', '', modeLabel(channel.mode)));
+    const tune = element('button', 'button', 'Tune in');
+    tune.setAttribute('aria-label', `Tune ${channel.name}`);
+    tune.addEventListener('click', () => { tuneTo(channel.frequency, channel.mode); showPage('explore'); });
+    row.append(main, frequency, tune);
+    return row;
+  }));
+}
+packSelect.addEventListener('change', renderPack);
+packSave.addEventListener('click', () => {
+  const result = addSawyerFavorites(state.favorites, packSelect.value, () => crypto.randomUUID());
+  if (!result.added) { notice('This preset is already in your favorites.'); return; }
+  state.favorites = result.favorites;
+  const saved = saveFavorites(state.favorites);
+  notice(saved ? `Added ${result.added} to favorites.` : `Added ${result.added} for this session; your browser blocked permanent storage.`, !saved);
+  renderFavorites(); renderFrequency();
+});
+renderPack();
+
 // One pass over published channels. Candidate strength never claims station identity.
 const scanTools = element('div', 'scan-tools');
 const scanButton = element('button', 'button', 'Scan channels'); scanButton.id = 'scan-button';
@@ -510,12 +572,22 @@ function renderScanResults() {
   }));
   if (!scanResults.length) scanList.append(element('p', 'help-text', currentScan ? 'Checking settled signal levels…' : 'No candidates crossed the selected threshold. Try a different band, antenna position, or squelch threshold.'));
 }
-scanButton.addEventListener('click', async () => {
+async function runChannelScan(channels) {
+  if (hostedPreview) return;
   if (currentScan) { await scanner.cancel(); return; }
+  if (!channels.length || state.busy) return;
   clearTimeout(tuningTimer); tuningRevision++; scanResults = []; currentScan = true; renderScanResults();
   scanButton.textContent = 'Stop scan'; renderReceiver();
-  try { await scanner.start(scanChannels(state.bandID), settings()); }
+  try { await scanner.start(channels, settings()); }
   catch (error) { report(error); currentScan = false; scanButton.textContent = 'Scan channels'; renderReceiver(); }
+}
+scanButton.addEventListener('click', () => runChannelScan(scanChannels(state.bandID)));
+packScan.addEventListener('click', () => {
+  const channels = sawyerScanChannels(packSelect.value);
+  if (hostedPreview || !channels.length || state.busy) return;
+  showPage('explore');
+  if (currentScan) return;
+  runChannelScan(channels);
 });
 scanner.addEventListener('status', ({ detail }) => {
   currentScan = detail.running; scanButton.textContent = currentScan ? 'Stop scan' : 'Scan channels';
