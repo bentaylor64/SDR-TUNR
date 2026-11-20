@@ -10,7 +10,7 @@ export class ChannelScanner extends EventTarget {
     if (!valid.length) throw new Error('This band has no listed channels to scan. Use precision tuning.');
     // Authorize audio while still inside the click handler, before any await.
     this.cancel(false);
-    const run = { settings: { ...settings }, volume: this.transport.volume, cancelled: false, results: [], index: 0 };
+    const run = { settings: { ...settings }, volume: this.transport.volume, cancelled: false, failed: false, results: [], index: 0 };
     this.run = run;
     this.transport.setVolume(0);
     try {
@@ -36,7 +36,7 @@ export class ChannelScanner extends EventTarget {
         }
       }
     } catch (error) {
-      if (!run.cancelled) this.emit('error', { message: error.message });
+      if (!run.cancelled) { run.failed = true; this.emit('error', { message: error.message }); }
     } finally {
       run.endObservation?.();
       if (this.run === run) {
@@ -46,7 +46,7 @@ export class ChannelScanner extends EventTarget {
           try { await this.transport.tune(run.settings); } catch { /* Connection failure already surfaces in the receiver UI. */ }
         }
         this.emit('status', { running: false, index: run.index + 1, total: valid.length, message: run.cancelled ? 'Scan stopped' : 'Scan complete' });
-        this.emit('complete', { results: run.results, cancelled: run.cancelled });
+        this.emit('complete', { results: run.results, cancelled: run.cancelled, failed: run.failed });
       }
     }
     return run.results;
