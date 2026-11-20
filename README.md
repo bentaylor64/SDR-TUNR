@@ -306,3 +306,24 @@ When reporting a problem, include version `1.14.0`, operating system and archite
 ## License status
 
 No project license file is included with this release. Public repository visibility by itself does not grant permission to copy, modify, or redistribute the project. Unless the repository owner provides separate terms, all rights remain reserved.
+
+## Sawyer BandPack (review branch)
+
+Open **Nearby stations → Sawyer BandPack** for the 82 receive-only channels from
+the Sawyer, Michigan TD-H3 listening plan. Choose Bedside, GMRS/FRS, Ham, Rail,
+Air Voice, Marine, or another preset. Tune an exact channel or save the preset to
+browser-local Favorites without overwriting existing favorite names. NOAA,
+airport weather/ATIS, Air Guard, and ISS are manual-only in this pack. Pack scan
+results measure energy; they do not verify station identity or coverage.
+
+The hosted demo lets you browse, tune its synthetic signal, and use Favorites,
+but scan buttons only run with the local receiver. The original 1.14.0 ZIP is
+unchanged. To test the pack on a separate, fresh extraction of that package:
+
+```sh
+python3 scripts/apply-sawyer-bandpack.py /path/to/extracted/SDR-TUNR-Web
+node --test tests/sawyer-bandpack.test.mjs
+```
+
+The overlay copies two JavaScript files into the extracted package. It does not
+change binaries, hosted assets, USB settings, or the original download.
